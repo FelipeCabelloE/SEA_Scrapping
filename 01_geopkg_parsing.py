@@ -3,11 +3,10 @@ from urllib.parse import parse_qs, urlparse
 import geopandas as gpd
 import pandas as pd
 from bs4 import BeautifulSoup
-from rich import print
 
 
 # Function to extract data from HTML
-def extract_info(html):
+def extract_iframe_info(html):
     soup = BeautifulSoup(html, "html.parser")
     # Extract text inside <b> tag
     bold_text = soup.find("b").get_text(strip=True) if soup.find("b") else None
@@ -28,16 +27,12 @@ def extract_info(html):
 
 
 def main():
-    gdf_proyectos = gpd.read_file("./DATA/proyectos.gpkg")
-    print(gdf_proyectos.info())
+    gdf_proyectos: gpd.GeoDataFrame = gpd.read_file("./DATA/proyectos.gpkg")
     gdf_proyectos = gdf_proyectos.loc[:, ["Name", "description", "geometry"]]
-    print(gdf_proyectos.info())
-    print(gdf_proyectos["description"])
     gdf_proyectos[["bold_text", "iframe_src", "constructed_link"]] = gdf_proyectos[
         "description"
-    ].apply(lambda x: pd.Series(extract_info(x)))
-    print(gdf_proyectos.info())
-    print(gdf_proyectos["constructed_link"][0])
+    ].apply(lambda x: pd.Series(extract_iframe_info(x)))
+    gdf_proyectos.to_file("./DATA/proyectos_cleaned.gpkg")
 
 
 if __name__ == "__main__":

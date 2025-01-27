@@ -24,7 +24,7 @@ async def get_and_convert_proyects():
         boton_buscar = "div.centrar-boton > button.bot_70px"
         await page.wait_for_selector(boton_buscar)
         await page.click(boton_buscar)
-        kmz_link = 'a[href="/mapa/generarKMZ.php?validado=1"]'
+        kmz_link = 'a[href="/mapa/generarKMZ.php?validado=0"]'
         await page.wait_for_selector(kmz_link)
         async with page.expect_download(timeout=0) as download_info:
             await page.click(kmz_link)

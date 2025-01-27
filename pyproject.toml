@@ -15,3 +15,8 @@ dependencies = [
     "rich>=13.9.4",
     "seaborn>=0.13.2",
 ]
+
+
+[tool.ruff.lint]
+# List of rules that should never be auto-fixed
+unfixable = ["F401"]
