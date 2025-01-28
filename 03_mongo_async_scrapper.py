@@ -1,19 +1,17 @@
 import asyncio
-import os
 from curl_cffi.requests import AsyncSession
 import logging
 from rich.logging import RichHandler
 import time
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 import geopandas as gpd
 from datetime import datetime
 
 MONGO_LINK = "mongodb://root:example@localhost:27017/?authSource=admin"
 MONDB_NAME = "SCRAPED_SEA"
-# Collection name based on time scraped
 MONCOL_NAME = f"proyects_{int(time.time())}"
 
-client = MongoClient(MONGO_LINK)
+client = AsyncIOMotorClient(MONGO_LINK)
 db = client[MONDB_NAME]
 collection = db[MONCOL_NAME]
 
@@ -30,39 +28,63 @@ logging.basicConfig(
 log = logging.getLogger("rich")
 
 proyects = gpd.read_file("./DATA/proyectos_cleaned.gpkg")
-# Get the first 10 constructed links
-urls = proyects["constructed_link"][:10].tolist()
+urls = proyects["constructed_link"].tolist()
+
+CONCURRENT_REQUESTS = 100
+RETRY_LIMIT = 3
+
+semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS)
+failed_urls = []
+
+
+async def fetch(session, url):
+    for attempt in range(RETRY_LIMIT):
+        try:
+            async with semaphore:
+                response = await session.get(url, timeout=10)
+                response.raise_for_status()
+                return response
+        except Exception as e:
+            log.error(f"Error fetching {url}: {e}")
+            if attempt < RETRY_LIMIT - 1:
+                log.info(f"Retrying {url} (attempt {attempt + 1})")
+                await asyncio.sleep(2**attempt)
+            else:
+                log.error(f"Failed to fetch {url} after {RETRY_LIMIT} attempts")
+                failed_urls.append(url)
+                return None
+
+
+async def save_to_db(response):
+    if response and response.status_code == 200:
+        document = {
+            "url": response.url,
+            "date": datetime.now(),
+            "content": response.text,
+        }
+        await collection.insert_one(document)
+        log.info(f"Inserted document for {response.url}")
+
+
+async def process_urls(urls):
+    async with AsyncSession() as session:
+        tasks = [fetch(session, url) for url in urls]
+        for task in asyncio.as_completed(tasks):
+            response = await task
+            await save_to_db(response)
+
+
+async def retry_failed_urls():
+    if failed_urls:
+        log.info(f"Retrying {len(failed_urls)} failed URLs")
+        await process_urls(failed_urls)
 
 
 async def run():
-    async with AsyncSession() as session:
-        tasks = []
-
-        for url in urls:
-            task = session.get(url)
-            tasks.append(task)
-
-        result = await asyncio.gather(*tasks)
-    return result
+    await process_urls(urls)
+    await retry_failed_urls()
 
 
-data = asyncio.run(run())
-
-failed = []
-results = []
-
-for i, response in enumerate(data):
-    if response.status_code != 200:
-        log.warning(f"Request {urls[i]} failed with status code {response.status_code}")
-        failed.append(response.url)
-    else:
-        results.append(
-            {"url": response.url, "date": datetime.now(), "content": response.text}
-        )
-
-inserted = collection.insert_many(results)
-log.info(f"Inserted {len(inserted.inserted_ids)} documents into {MONCOL_NAME}")
-
-log.info(f"Failed requests: {failed}")
-
-print(f"--- {time.time() - start_time} seconds ---")
+if __name__ == "__main__":
+    asyncio.run(run())
+    log.info(f"Completed in {time.time() - start_time} seconds")
