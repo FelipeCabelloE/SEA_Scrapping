@@ -1,6 +1,7 @@
 
 DATA
-
+*.duckdb
+*.png
 
 
 # Byte-compiled / optimized / DLL files
